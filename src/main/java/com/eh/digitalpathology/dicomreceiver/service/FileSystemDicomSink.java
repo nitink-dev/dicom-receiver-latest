@@ -1,67 +1,38 @@
 package com.eh.digitalpathology.dicomreceiver.service;
 
 import com.eh.digitalpathology.dicomreceiver.api.DicomObjectSink;
-import com.eh.digitalpathology.dicomreceiver.config.ServerConfig;
-import com.eh.digitalpathology.dicomreceiver.constants.StorageObjectRef;
-import com.eh.digitalpathology.dicomreceiver.enums.StorageType;
+import com.eh.digitalpathology.dicomreceiver.config.StorageProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
-import java.io.*;
-import java.nio.file.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 
-@Component
-@ConditionalOnProperty( name = "server.storage.type", havingValue = "filesystem" )
+@Service
+@ConditionalOnProperty(name = "app.storage.type", havingValue = "local", matchIfMissing = true)
 public class FileSystemDicomSink implements DicomObjectSink {
 
-    private final Path baseDir;
+    private final Path root;
 
-    public FileSystemDicomSink ( ServerConfig serverConfig ) {
-        this.baseDir = Paths.get( serverConfig.getPath( ) );
+    public FileSystemDicomSink(StorageProperties storageProperties) throws IOException {
+        this.root = Paths.get(storageProperties.getLocalPath());
+        Files.createDirectories(root);
     }
 
     @Override
-    public OutputStream openStream ( String objectName ) throws IOException {
-        Path targetPath = baseDir.resolve( objectName );
-        Files.createDirectories( targetPath.getParent( ) );
-        return new BufferedOutputStream( Files.newOutputStream( targetPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING ), 16 * 1024 * 1024 );
+    public String store(Path source, String targetName) throws IOException {
+        Path target = root.resolve(targetName);
+        Files.createDirectories(target.getParent());
+        Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        return target.toString();
     }
 
     @Override
-    public StorageObjectRef objectRef ( String objectName ) {
-        return new StorageObjectRef( StorageType.FILESYSTEM, baseDir.toString( ), objectName );
+    public InputStream openInputStream(String storedRef) throws IOException {
+        return Files.newInputStream(Paths.get(storedRef));
     }
-
-
-    @Override
-    public InputStream openInputStream ( StorageObjectRef ref ) throws IOException {
-        Path path = Paths.get( ref.uri( ) );
-        return new BufferedInputStream( Files.newInputStream( path ), 16 * 1024 * 1024 );
-    }
-
-    @Override
-    public void delete ( StorageObjectRef ref ) {
-        try {
-            Files.deleteIfExists( Paths.get( ref.uri( ) ) );
-        } catch ( IOException ignored ) {
-            // Exception ignored - best effort cleanup
-        }
-    }
-
-    @Override
-    public StorageObjectRef move ( StorageObjectRef ref, String newPrefix ) {
-        try {
-            Path src = Paths.get( ref.uri( ) );
-            Path targetDir = src.getParent( ).resolveSibling( newPrefix );
-            Files.createDirectories( targetDir );
-            Path target = targetDir.resolve( src.getFileName( ) );
-
-            Files.move( src, target, StandardCopyOption.REPLACE_EXISTING );
-
-            return new StorageObjectRef( StorageType.FILESYSTEM, targetDir.getParent( ).toString( ), targetDir.relativize( target ).toString( ) );
-        } catch ( IOException e ) {
-            throw new RuntimeException( "Move failed", e );
-        }
-    }
-
 }

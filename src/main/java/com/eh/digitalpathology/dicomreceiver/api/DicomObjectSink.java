@@ -1,21 +1,17 @@
 package com.eh.digitalpathology.dicomreceiver.api;
 
-import com.eh.digitalpathology.dicomreceiver.constants.StorageObjectRef;
-
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
+import java.nio.file.Path;
 
+/**
+ * Storage abstraction for managed DICOM files. Implementations move a file out of the
+ * watch directory into durable storage (local disk or GCS) and hand back a reference
+ * that can later be used to re-open the stored content.
+ */
 public interface DicomObjectSink {
 
-    OutputStream openStream ( String objectName ) throws IOException;
+    String store(Path source, String targetName) throws IOException;
 
-    StorageObjectRef objectRef ( String objectName );
-
-    InputStream openInputStream ( StorageObjectRef ref ) throws IOException;
-
-    void delete ( StorageObjectRef ref );
-
-    StorageObjectRef move ( StorageObjectRef ref, String newPrefix );
-
+    InputStream openInputStream(String storedRef) throws IOException;
 }

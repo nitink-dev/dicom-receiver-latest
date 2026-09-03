@@ -1,74 +1,79 @@
 package com.eh.digitalpathology.dicomreceiver.service;
 
 import com.eh.digitalpathology.dicomreceiver.api.DicomObjectSink;
-import com.eh.digitalpathology.dicomreceiver.config.KafkaTopicConfig;
-import com.eh.digitalpathology.dicomreceiver.constants.StorageObjectRef;
-import com.eh.digitalpathology.dicomreceiver.model.DicomRequestDBObject;
-import com.eh.digitalpathology.dicomreceiver.model.ReqGeneratorNotificationMsg;
-import com.eh.digitalpathology.dicomreceiver.model.SlideScanProgressEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.eh.digitalpathology.dicomreceiver.entity.TransferRecord;
+import com.eh.digitalpathology.dicomreceiver.model.DicomMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import static com.eh.digitalpathology.dicomreceiver.constants.SlideScanStatusConstant.SLIDE_SCAN_ENRICH_IN_PROGRESS;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.LocalDateTime;
 
+/**
+ * Main business workflow: store the incoming file, extract its metadata, and record
+ * the transfer so it shows up in the monitoring dashboard. Files that aren't valid
+ * DICOM are moved aside into a "rejected" folder instead of being processed.
+ */
 @Service
 public class FileProcessingService {
-    private final DicomExtractorService dicomExtractorService;
-    private final DatabaseService databaseService;
-    private final EventNotificationService eventNotificationService;
-    private final KafkaTopicConfig kafkaTopicConfig;
-    public static final String DICOM_RECEIVER = "dicom-receiver";
+
+    private static final Logger log = LoggerFactory.getLogger(FileProcessingService.class);
+
     private final DicomObjectSink sink;
+    private final DicomExtractorService extractorService;
+    private final DatabaseService databaseService;
 
-    private static final Logger log = LoggerFactory.getLogger( FileProcessingService.class.getName( ) );
-    private ObjectMapper objectMapper = new ObjectMapper( );
-
-    public FileProcessingService ( DicomExtractorService dicomExtractorService, DatabaseService databaseService, EventNotificationService eventNotificationService, KafkaTopicConfig kafkaTopicConfig, DicomObjectSink sink ) {
-        this.dicomExtractorService = dicomExtractorService;
-        this.databaseService = databaseService;
-        this.eventNotificationService = eventNotificationService;
-        this.kafkaTopicConfig = kafkaTopicConfig;
+    public FileProcessingService(DicomObjectSink sink, DicomExtractorService extractorService,
+                                  DatabaseService databaseService) {
         this.sink = sink;
+        this.extractorService = extractorService;
+        this.databaseService = databaseService;
     }
 
-    public void processFile ( StorageObjectRef ref ) {
-        log.info( "processFile :: ===============================>Process File thread Started:{}", Thread.currentThread( ).getName( ) );
-        if ( ref.objectName( ).endsWith( ".svs" ) ) {
-            sink.move( ref, "svs");
-            return;
-        }
+    public void processFile(Path file) {
+        String fileName = file.getFileName().toString();
         try {
-            DicomRequestDBObject dicomRequestDBObject = dicomExtractorService.extract( ref );
-            if ( dicomRequestDBObject == null ) {
-                log.error( "processFile :: Dicom extracted for qa slide or research or failed for file: {}", ref.objectName( ) );
-                return;
+            DicomMetadata metadata;
+            try (InputStream in = Files.newInputStream(file)) {
+                metadata = extractorService.extract(in);
             }
-            String status = databaseService.insertDicomData( dicomRequestDBObject, DICOM_RECEIVER );
-            log.info( "processFile :: response from insertDicomData(): {}", status );
-            if ( "success".equalsIgnoreCase( status ) ) {
-                log.info( "processFile :: Data insertion successful !!!\n sending kafka notification.." );
-                ReqGeneratorNotificationMsg msg = new ReqGeneratorNotificationMsg( dicomRequestDBObject.getBarcode( ), dicomRequestDBObject.getSopInstanceUid( ), dicomRequestDBObject.getSeriesInstanceUid( ), dicomRequestDBObject.getDeviceSerialNumber( ) );
-                notifyKafka( kafkaTopicConfig.getDcm( ),  dicomRequestDBObject.getBarcode( ), msg );
-                SlideScanProgressEvent slideScanProgressEvent = new SlideScanProgressEvent( dicomRequestDBObject.getBarcode( ), dicomRequestDBObject.getSeriesInstanceUid( ), dicomRequestDBObject.getDeviceSerialNumber( ), SLIDE_SCAN_ENRICH_IN_PROGRESS );
-                notifyKafka( kafkaTopicConfig.getScanProgress( ), slideScanProgressEvent.slideBarcode( ), slideScanProgressEvent );
-            } else {
-                log.info( "processFile :: KAFKA NOT NOTIFIED!!!.. " );
-            }
-        } catch ( Exception ex ) {
-            log.error( "processFile :: Exception occurred while processing file: {} error: {}", ref.objectName( ), ex.getMessage( ) );
-            sink.delete( ref );
+
+            String storedPath = sink.store(file, fileName);
+
+            TransferRecord record = new TransferRecord();
+            record.setFileName(fileName);
+            record.setSeriesInstanceUid(metadata.seriesInstanceUid());
+            record.setSopInstanceUid(metadata.sopInstanceUid());
+            record.setStudyInstanceUid(metadata.studyInstanceUid());
+            record.setPatientId(metadata.patientId());
+            record.setPatientName(metadata.patientName());
+            record.setModality(metadata.modality());
+            record.setManufacturer(metadata.manufacturer());
+            record.setManufacturerModelName(metadata.manufacturerModelName());
+            record.setDeviceSerialNumber(metadata.deviceSerialNumber());
+            record.setStoragePath(storedPath);
+            record.setTransactionDateTime(LocalDateTime.now());
+
+            databaseService.save(record);
+            log.info("Processed {} -> {}", fileName, storedPath);
+        } catch (Exception e) {
+            log.warn("Rejecting {}: {}", fileName, e.getMessage());
+            reject(file);
         }
     }
 
-    public void notifyKafka ( String topic, String key, Object value ) {
+    private void reject(Path file) {
         try {
-            eventNotificationService.sendEvent( topic, key, objectMapper.writeValueAsString( value ) );
-        } catch ( JsonProcessingException e ) {
-            log.error( "notifyKafka: JSON serialization failed | topic={} key={} error={}", topic, key, e.getMessage( ), e );
+            Path rejectedDir = file.getParent().resolve("rejected");
+            Files.createDirectories(rejectedDir);
+            Files.move(file, rejectedDir.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException moveFailure) {
+            log.error("Failed to move rejected file {}: {}", file, moveFailure.getMessage());
         }
     }
-
 }

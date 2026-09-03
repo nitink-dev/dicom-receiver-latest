@@ -1,15 +1,16 @@
 package com.eh.digitalpathology.dicomreceiver;
 
-
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
-public class DicomReceiverApplication{
+@EnableScheduling
+@ConfigurationPropertiesScan
+public class DicomReceiverApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(DicomReceiverApplication.class, args);
     }
-
 }
-

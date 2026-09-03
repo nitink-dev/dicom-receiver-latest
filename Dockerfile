@@ -1,14 +1,13 @@
-# Use the official OpenJDK 17 image as the base image
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /build
+COPY pom.xml .
+RUN mvn -q -B dependency:go-offline
+COPY src ./src
+RUN mvn -q -B package -DskipTests
+
 FROM amazoncorretto:17-alpine3.22
-
-# Set the working directory inside the container
 WORKDIR /app
-
-# Copy the Spring Boot jar file into the container
-COPY target/*.jar /app/dicom-receiver.jar
-
-# Expose the port your Spring Boot application runs on
+COPY --from=build /build/target/dicom-receiver.jar /app/dicom-receiver.jar
+VOLUME /data
 EXPOSE 8080
-
-# Command to run the Spring Boot application
 ENTRYPOINT ["java", "-jar", "/app/dicom-receiver.jar"]
