@@ -1,0 +1,58 @@
+db:
+  connector:
+    insert:
+      uri: dicom/instances
+  service:
+    url: http://10.201.8.58:8081/api/
+app:
+  redis:
+    mode: standalone
+file:
+  server:
+    path: /opt/fileserver
+server:
+  storage:
+    type: gcs
+
+max:
+  retries: 3
+kafka:
+  topic:
+    receiver: dcm-recv-topic
+    stgcmt: stgcmt-svc-topic
+    email: email-svc-topic
+    pathqa: pathqa-svc-topic
+    scan-progress: scan-progress-topic
+
+sharedfolder:
+  servername: 10.201.8.11
+  sharepath: Citius-Dev
+  enable-remote-access: false
+spring:
+  application:
+    name: eh-dicom-receiver
+  main:
+    banner-mode: log
+    web-application-type: REACTIVE
+  redis:
+    host: 10.201.8.192
+    port: 6379
+dicom:
+  barcode:
+    generation:
+      enable: true
+storescp:
+  aetitle: EH_ENRICH
+  port: 2575
+
+research:
+  enable: true
+
+visiopharm:
+  url: http://10.201.8.34:81/AEPWEB/notification
+
+gcp-config:
+  pathqa-store-url: projects/prj-d-path-integration-cs1h/locations/us-central1/datasets/digital-pathology-dataset/dicomStores/digital-pathology-intermediate-dicom-store
+  research-store-url: projects/prj-d-path-integration-cs1h/locations/us-central1/datasets/digital-pathology-dataset/dicomStores/dp-academic-dicom-store
+
+

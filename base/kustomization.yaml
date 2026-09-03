@@ -1,0 +1,7 @@
+resources:
+    - rbac.yaml
+    - autoscale.yaml
+    - pdb.yaml
+    - dicomrecv-service.yaml
+    - dicomrecv-deploy.yaml
+  
