@@ -20,6 +20,11 @@ app:
   watch:
     directory: ./data/incoming
     poll-interval-ms: 5000
+  scp:
+    enabled: true
+    ae-title: DICOMRECV
+    port: 11112
+    bind-address: 0.0.0.0
   storage:
     type: local
     local-path: ./data/storage

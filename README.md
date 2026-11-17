@@ -14,9 +14,13 @@ of the original external "DB connector" microservice.
 ## Architecture
 
 ```
-Directory Watcher -> File Processing Service -> Metadata Extraction -> Database Update -> Storage (Local / GCS) -> Monitoring Dashboard (UI)
+Scanner / storeSCU -> Store SCP -> (watch folder) -> Directory Watcher -> File Processing Service -> Metadata Extraction -> Database Update -> Storage (Local / GCS) -> Monitoring Dashboard (UI)
 ```
 
+- **StoreScpService** — DICOM Store SCP started on application load. Receives C-STORE
+  from a Leica scanner or any storeSCU client (also answers C-ECHO) and writes files into
+  the watch folder as `.tmp`, renaming to `.dcm` when complete so the watcher never sees
+  a partial file. All SOP classes / transfer syntaxes are accepted.
 - **DirectoryWatcherService** — polls a single configured folder for new files, only
   handing a file off once its size and modification time are stable across two polls.
 - **FileProcessingService** — orchestrates: extract metadata, store the file, persist a
@@ -35,7 +39,13 @@ Directory Watcher -> File Processing Service -> Metadata Extraction -> Database 
 mvn spring-boot:run
 ```
 
-Then drop a `.dcm` file into `./data/incoming` — within one poll interval (default 5s)
+The Store SCP listens on port 11112 (AE title `DICOMRECV`). Send a file with, e.g.:
+
+```
+storescu -c DICOMRECV@localhost:11112 file.dcm
+```
+
+Alternatively drop a `.dcm` file into `./data/incoming` — within one poll interval (default 5s)
 it will be moved into `./data/storage` and appear as a row at http://localhost:8080/.
 
 ## Configuration
@@ -47,6 +57,10 @@ environment variables (Spring relaxed binding), e.g.:
 |---|---|---|
 | `app.watch.directory` | `APP_WATCH_DIRECTORY` | `./data/incoming` |
 | `app.watch.poll-interval-ms` | `APP_WATCH_POLL_INTERVAL_MS` | `5000` |
+| `app.scp.enabled` | `APP_SCP_ENABLED` | `true` |
+| `app.scp.ae-title` | `APP_SCP_AE_TITLE` | `DICOMRECV` |
+| `app.scp.port` | `APP_SCP_PORT` | `11112` |
+| `app.scp.bind-address` | `APP_SCP_BIND_ADDRESS` | `0.0.0.0` |
 | `app.storage.type` | `APP_STORAGE_TYPE` | `local` |
 | `app.storage.local-path` | `APP_STORAGE_LOCAL_PATH` | `./data/storage` |
 | `app.storage.gcs-bucket` | `APP_STORAGE_GCS_BUCKET` | (empty) |
@@ -63,5 +77,5 @@ mvn test
 
 ```
 docker build -t dicom-receiver-simplified .
-docker run -p 8080:8080 -v $(pwd)/data:/data dicom-receiver-simplified
+docker run -p 8080:8080 -p 11112:11112 -v $(pwd)/data:/data dicom-receiver-simplified
 ```
