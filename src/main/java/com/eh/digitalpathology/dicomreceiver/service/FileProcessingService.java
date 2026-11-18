@@ -45,7 +45,14 @@ public class FileProcessingService {
 
             String storedPath = sink.store(file, fileName);
 
+            // Same SOP Instance UID already received: overwrite that record instead of adding a new one.
+            TransferRecord existing = databaseService.findBySopInstanceUid(metadata.sopInstanceUid())
+                    .orElse(null);
+
             TransferRecord record = new TransferRecord();
+            if (existing != null) {
+                record.setId(existing.getId());
+            }
             record.setFileName(fileName);
             record.setSeriesInstanceUid(metadata.seriesInstanceUid());
             record.setSopInstanceUid(metadata.sopInstanceUid());
@@ -59,11 +66,29 @@ public class FileProcessingService {
             record.setStoragePath(storedPath);
             record.setTransactionDateTime(LocalDateTime.now());
 
-            databaseService.save(record);
+            TransferRecord saved = databaseService.save(record);
+            if (existing != null) {
+                removeSupersededFile(existing.getStoragePath(), storedPath);
+                if (saved != null) {
+                    databaseService.removeDuplicates(metadata.sopInstanceUid(), saved.getId());
+                }
+                log.info("Duplicate SOP {} - existing record {} overwritten", metadata.sopInstanceUid(), existing.getId());
+            }
             log.info("Processed {} -> {}", fileName, storedPath);
         } catch (Exception e) {
             log.warn("Rejecting {}: {}", fileName, e.getMessage());
             reject(file);
+        }
+    }
+
+    private void removeSupersededFile(String oldRef, String newRef) {
+        if (oldRef == null || oldRef.equals(newRef)) {
+            return;
+        }
+        try {
+            sink.delete(oldRef);
+        } catch (Exception e) {
+            log.warn("Could not remove superseded file {}: {}", oldRef, e.getMessage());
         }
     }
 

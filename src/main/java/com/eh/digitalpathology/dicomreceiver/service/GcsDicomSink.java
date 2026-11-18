@@ -38,6 +38,14 @@ public class GcsDicomSink implements DicomObjectSink {
     }
 
     @Override
+    public void delete(String storedRef) throws IOException {
+        String prefix = "gs://" + bucket + "/";
+        if (storedRef != null && storedRef.startsWith(prefix)) {
+            storage.delete(BlobId.of(bucket, storedRef.substring(prefix.length())));
+        }
+    }
+
+    @Override
     public InputStream openInputStream(String storedRef) throws IOException {
         String objectName = storedRef.substring(("gs://" + bucket + "/").length());
         Blob blob = storage.get(BlobId.of(bucket, objectName));

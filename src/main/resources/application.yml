@@ -25,6 +25,13 @@ app:
     ae-title: DICOMRECV
     port: 11112
     bind-address: 0.0.0.0
+  qr:
+    enabled: true
+    ae-title: DCMQRSCP
+    port: 11113
+    bind-address: 0.0.0.0
+    # C-MOVE destinations: AE title -> host:port
+    move-destinations: {}
   storage:
     type: local
     local-path: ./data/storage

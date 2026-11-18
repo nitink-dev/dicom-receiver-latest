@@ -21,6 +21,11 @@ Scanner / storeSCU -> Store SCP -> (watch folder) -> Directory Watcher -> File P
   from a Leica scanner or any storeSCU client (also answers C-ECHO) and writes files into
   the watch folder as `.tmp`, renaming to `.dcm` when complete so the watcher never sees
   a partial file. All SOP classes / transfer syntaxes are accepted.
+- **QrScpService** — Query/Retrieve SCP (dcmqrscp equivalent) on port 11113, AE title
+  `DCMQRSCP`. Serves C-ECHO, C-FIND, C-GET and C-MOVE (Patient Root / Study Root) from the
+  database records and stored files. C-MOVE destinations are configured under
+  `app.qr.move-destinations` (AE title -> `host:port`). Files are streamed as stored
+  (no transcoding).
 - **DirectoryWatcherService** — polls a single configured folder for new files, only
   handing a file off once its size and modification time are stable across two polls.
 - **FileProcessingService** — orchestrates: extract metadata, store the file, persist a
@@ -29,9 +34,12 @@ Scanner / storeSCU -> Store SCP -> (watch folder) -> Directory Watcher -> File P
   the DICOM file using dcm4che.
 - **FileSystemDicomSink** / **GcsDicomSink** — mutually exclusive storage backends,
   selected by `app.storage.type` (`local` or `gcs`).
+- **Duplicates** — a file whose SOP Instance UID already has a record overwrites that
+  record (same row, new metadata/timestamp) and replaces the stored file; no new row.
 - **DatabaseService** — persists/searches `TransferRecord`s via Spring Data JPA + H2.
 - **DashboardController** — single reporting screen (`/`) listing all transfers, with
-  search (file name or series ID) and sortable columns.
+  search (file name or series ID), sortable columns, and a Delete button per row (with a
+  confirmation prompt; removes the record only, the stored file is kept).
 
 ## Running locally
 
@@ -61,6 +69,11 @@ environment variables (Spring relaxed binding), e.g.:
 | `app.scp.ae-title` | `APP_SCP_AE_TITLE` | `DICOMRECV` |
 | `app.scp.port` | `APP_SCP_PORT` | `11112` |
 | `app.scp.bind-address` | `APP_SCP_BIND_ADDRESS` | `0.0.0.0` |
+| `app.qr.enabled` | `APP_QR_ENABLED` | `true` |
+| `app.qr.ae-title` | `APP_QR_AE_TITLE` | `DCMQRSCP` |
+| `app.qr.port` | `APP_QR_PORT` | `11113` |
+| `app.qr.bind-address` | `APP_QR_BIND_ADDRESS` | `0.0.0.0` |
+| `app.qr.move-destinations.<AET>` | `APP_QR_MOVE_DESTINATIONS_<AET>` | (none) |
 | `app.storage.type` | `APP_STORAGE_TYPE` | `local` |
 | `app.storage.local-path` | `APP_STORAGE_LOCAL_PATH` | `./data/storage` |
 | `app.storage.gcs-bucket` | `APP_STORAGE_GCS_BUCKET` | (empty) |
@@ -77,5 +90,5 @@ mvn test
 
 ```
 docker build -t dicom-receiver-simplified .
-docker run -p 8080:8080 -p 11112:11112 -v $(pwd)/data:/data dicom-receiver-simplified
+docker run -p 8080:8080 -p 11112:11112 -p 11113:11113 -v $(pwd)/data:/data dicom-receiver-simplified
 ```

@@ -6,6 +6,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.List;
@@ -43,5 +46,19 @@ public class DashboardController {
         model.addAttribute("dir", direction.name().toLowerCase());
         model.addAttribute("nextDir", direction == Sort.Direction.ASC ? "desc" : "asc");
         return "dashboard";
+    }
+
+    @PostMapping("/records/{id}/delete")
+    public String delete(@PathVariable("id") Long id,
+                         @RequestParam(name = "q", required = false) String query,
+                         @RequestParam(name = "sort", required = false) String sortField,
+                         @RequestParam(name = "dir", required = false) String sortDir,
+                         RedirectAttributes redirect) {
+        boolean removed = databaseService.deleteById(id);
+        redirect.addFlashAttribute("message", removed ? "Record deleted." : "Record not found.");
+        if (query != null && !query.isBlank()) redirect.addAttribute("q", query);
+        if (sortField != null) redirect.addAttribute("sort", sortField);
+        if (sortDir != null) redirect.addAttribute("dir", sortDir);
+        return "redirect:/";
     }
 }

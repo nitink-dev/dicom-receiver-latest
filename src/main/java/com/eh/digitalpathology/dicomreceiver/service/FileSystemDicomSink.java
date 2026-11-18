@@ -32,6 +32,11 @@ public class FileSystemDicomSink implements DicomObjectSink {
     }
 
     @Override
+    public void delete(String storedRef) throws IOException {
+        Files.deleteIfExists(Paths.get(storedRef));
+    }
+
+    @Override
     public InputStream openInputStream(String storedRef) throws IOException {
         return Files.newInputStream(Paths.get(storedRef));
     }
