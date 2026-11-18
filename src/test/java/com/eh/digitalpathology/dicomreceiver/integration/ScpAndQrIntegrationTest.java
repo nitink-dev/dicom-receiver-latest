@@ -222,7 +222,77 @@ class ScpAndQrIntegrationTest {
         assertEquals(1, received.get());
     }
 
+    /** Runs one storage commitment request against the given port/AET; returns {actionStatus, eventType, committed, failed}. */
+    int[] commit(int port, String calledAet, String... sopUids) throws Exception {
+        Device d = clientDevice();
+        ApplicationEntity ae = d.getApplicationEntity("CLIENT");
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        int[] result = new int[4];
+        DicomServiceRegistry reg = new DicomServiceRegistry();
+        reg.addDicomService(new org.dcm4che3.net.service.AbstractDicomService(UID.StorageCommitmentPushModel) {
+            @Override
+            protected void onDimseRQ(Association as, PresentationContext pc, Dimse dimse, Attributes cmd, Attributes data)
+                    throws java.io.IOException {
+                if (dimse == Dimse.N_EVENT_REPORT_RQ) {
+                    result[1] = cmd.getInt(Tag.EventTypeID, 0);
+                    org.dcm4che3.data.Sequence ok = data.getSequence(Tag.ReferencedSOPSequence);
+                    org.dcm4che3.data.Sequence bad = data.getSequence(Tag.FailedSOPSequence);
+                    result[2] = ok == null ? 0 : ok.size();
+                    result[3] = bad == null ? 0 : bad.size();
+                    as.writeDimseRSP(pc, org.dcm4che3.net.Commands.mkNEventReportRSP(cmd, Status.Success), null);
+                    latch.countDown();
+                }
+            }
+        });
+        d.setDimseRQHandler(reg);
+        AAssociateRQ rq = new AAssociateRQ();
+        rq.setCalledAET(calledAet);
+        rq.addPresentationContext(new PresentationContext(1, UID.StorageCommitmentPushModel, UID.ImplicitVRLittleEndian));
+        rq.addRoleSelection(new RoleSelection(UID.StorageCommitmentPushModel, true, true));
+        Association as = ae.connect(new Connection(null, "localhost", port), rq);
+        Attributes action = new Attributes();
+        action.setString(Tag.TransactionUID, VR.UI, "1.2.3.99." + System.nanoTime());
+        org.dcm4che3.data.Sequence seq = action.newSequence(Tag.ReferencedSOPSequence, sopUids.length);
+        for (String u : sopUids) {
+            Attributes item = new Attributes();
+            item.setString(Tag.ReferencedSOPClassUID, VR.UI, CUID);
+            item.setString(Tag.ReferencedSOPInstanceUID, VR.UI, u);
+            seq.add(item);
+        }
+        as.naction(UID.StorageCommitmentPushModel, UID.StorageCommitmentPushModelInstance, 1, action,
+                UID.ImplicitVRLittleEndian, new DimseRSPHandler(as.nextMessageID()) {
+                    @Override
+                    public void onDimseRSP(Association as, Attributes cmd, Attributes data) {
+                        super.onDimseRSP(as, cmd, data);
+                        result[0] = cmd.getInt(Tag.Status, -1);
+                    }
+                });
+        assertTrue(latch.await(10, java.util.concurrent.TimeUnit.SECONDS), "no N-EVENT-REPORT received");
+        as.waitForOutstandingRSP();
+        as.release();
+        return result;
+    }
+
     @Test @Order(5)
+    void storageCommitmentConfirmsKnownAndRejectsUnknownInstances() throws Exception {
+        // known instance on the Store SCP (DICOMRECV) - the exact scenario from the reported error
+        int[] r = commit(scpPort, "DICOMRECV", SOP);
+        assertEquals(Status.Success, r[0]);
+        assertEquals(1, r[1]);
+        assertEquals(1, r[2]);
+        assertEquals(0, r[3]);
+        // unknown instance -> failure event with reason 0112H
+        r = commit(scpPort, "DICOMRECV", SOP, "9.9.9.9");
+        assertEquals(Status.Success, r[0]);
+        assertEquals(2, r[1]);
+        assertEquals(1, r[2]);
+        assertEquals(1, r[3]);
+        // also available on the Query/Retrieve SCP
+        r = commit(qrPort, "DCMQRSCP", SOP);
+        assertEquals(1, r[1]);
+    }
+
+    @Test @Order(6)
     void dashboardShowsDeleteButtonAndDeleteRemovesRecord() throws Exception {
         mvc.perform(get("/")).andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("confirm(")));

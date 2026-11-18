@@ -113,7 +113,20 @@ Other systems connect to port **11113**, AE title **DCMQRSCP**, and can:
 
 Files are sent exactly as stored (no format conversion).
 
-## 8. Which file does what
+## 8. Storage commitment ("did you really keep it?")
+
+After sending images, a scanner (or `stgcmtscu`) can ask: "please confirm you stored these".
+This works on **both** ports (11112 and 11113):
+
+1. The sender sends an **N-ACTION** with a transaction ID and a list of SOP Instance IDs.
+2. `StorageCommitmentScp` immediately replies "request accepted".
+3. It checks the database for each SOP ID.
+4. It then sends an **N-EVENT-REPORT** back on the same connection: *all committed*, or
+   *some failed* with the list of missing ones (reason "no such object instance").
+
+Without this service registered, the receiver rejected the request with status `0x0118`.
+
+## 9. Which file does what
 
 ```
 src/main/java/.../dicomreceiver/
@@ -127,6 +140,7 @@ src/main/java/.../dicomreceiver/
              FileSystemDicomSink / GcsDicomSink   storage (pick one in config)
              DatabaseService        saves, finds, deletes records
              QrScpService           C-FIND / C-GET / C-MOVE
+             StorageCommitmentScp   storage commitment (N-ACTION / N-EVENT-REPORT)
   api/       DicomObjectSink        the "storage" contract both sinks follow
   entity/    TransferRecord         one database row
   repository/ TransferRecordRepository
@@ -134,7 +148,7 @@ src/main/java/.../dicomreceiver/
 resources/   application.yml, templates/dashboard.html
 ```
 
-## 9. Quick test recipe
+## 10. Quick test recipe
 
 ```
 # 1. start the app
@@ -152,7 +166,7 @@ findscu -c DCMQRSCP@localhost:11113 -m QueryRetrieveLevel=STUDY -M StudyRoot -r 
 # 5. send the same file again -> still ONE row, updated time
 ```
 
-## 10. If something goes wrong
+## 11. If something goes wrong
 
 | Symptom | Likely cause |
 |---|---|

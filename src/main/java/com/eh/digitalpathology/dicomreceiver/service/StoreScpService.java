@@ -46,11 +46,14 @@ public class StoreScpService {
 
     private final ScpProperties props;
     private final Path watchDir;
+    private final StorageCommitmentScp storageCommitmentScp;
     private ExecutorService executor;
     private ScheduledExecutorService scheduler;
     private Device device;
 
-    public StoreScpService(ScpProperties props, WatcherProperties watcherProperties) {
+    public StoreScpService(ScpProperties props, WatcherProperties watcherProperties,
+                           StorageCommitmentScp storageCommitmentScp) {
+        this.storageCommitmentScp = storageCommitmentScp;
         this.props = props;
         this.watchDir = Paths.get(watcherProperties.getDirectory());
     }
@@ -77,6 +80,7 @@ public class StoreScpService {
 
         DicomServiceRegistry registry = new DicomServiceRegistry();
         registry.addDicomService(new BasicCEchoSCP());
+        registry.addDicomService(storageCommitmentScp);
         registry.addDicomService(new BasicCStoreSCP("*") {
             @Override
             protected void store(Association as, PresentationContext pc, Attributes rq,

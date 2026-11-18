@@ -21,6 +21,10 @@ Scanner / storeSCU -> Store SCP -> (watch folder) -> Directory Watcher -> File P
   from a Leica scanner or any storeSCU client (also answers C-ECHO) and writes files into
   the watch folder as `.tmp`, renaming to `.dcm` when complete so the watcher never sees
   a partial file. All SOP classes / transfer syntaxes are accepted.
+- **StorageCommitmentScp** — Storage Commitment Push Model SCP (`1.2.840.10008.1.20.1`),
+  registered on both the Store SCP (11112) and the Query/Retrieve SCP (11113). Answers the
+  SCU's N-ACTION, then sends an N-EVENT-REPORT on the same association: success for every
+  SOP instance we hold a record for, failure (reason 0112H) for unknown ones.
 - **QrScpService** — Query/Retrieve SCP (dcmqrscp equivalent) on port 11113, AE title
   `DCMQRSCP`. Serves C-ECHO, C-FIND, C-GET and C-MOVE (Patient Root / Study Root) from the
   database records and stored files. C-MOVE destinations are configured under

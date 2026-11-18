@@ -70,11 +70,14 @@ public class QrScpService {
     private final QrScpProperties props;
     private final DatabaseService databaseService;
     private final DicomObjectSink sink;
+    private final StorageCommitmentScp storageCommitmentScp;
     private ExecutorService executor;
     private ScheduledExecutorService scheduler;
     private Device device;
 
-    public QrScpService(QrScpProperties props, DatabaseService databaseService, DicomObjectSink sink) {
+    public QrScpService(QrScpProperties props, DatabaseService databaseService, DicomObjectSink sink,
+                        StorageCommitmentScp storageCommitmentScp) {
+        this.storageCommitmentScp = storageCommitmentScp;
         this.props = props;
         this.databaseService = databaseService;
         this.sink = sink;
@@ -96,6 +99,8 @@ public class QrScpService {
         ae.setAssociationAcceptor(true);
         ae.addConnection(conn);
         ae.addTransferCapability(new TransferCapability(null, UID.Verification, TransferCapability.Role.SCP, UID.ImplicitVRLittleEndian));
+        ae.addTransferCapability(new TransferCapability(null, UID.StorageCommitmentPushModel, TransferCapability.Role.SCP,
+                UID.ImplicitVRLittleEndian, UID.ExplicitVRLittleEndian));
         for (String[] group : new String[][]{FIND, GET, MOVE}) {
             for (String cuid : group) {
                 ae.addTransferCapability(new TransferCapability(null, cuid, TransferCapability.Role.SCP, UID.ImplicitVRLittleEndian,
@@ -107,6 +112,7 @@ public class QrScpService {
 
         DicomServiceRegistry registry = new DicomServiceRegistry();
         registry.addDicomService(new BasicCEchoSCP());
+        registry.addDicomService(storageCommitmentScp);
         registry.addDicomService(new BasicCFindSCP(FIND) {
             @Override
             protected QueryTask calculateMatches(Association as, PresentationContext pc, Attributes rq, Attributes keys)
