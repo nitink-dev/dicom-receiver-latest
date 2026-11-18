@@ -41,6 +41,8 @@ Scanner / storeSCU -> Store SCP -> (watch folder) -> Directory Watcher -> File P
   search (file name or series ID), sortable columns, and a Delete button per row (with a
   confirmation prompt; removes the record only, the stored file is kept).
 
+For a plain-language walkthrough of the whole flow see [docs/CODE_FLOW.md](docs/CODE_FLOW.md).
+
 ## Running locally
 
 ```
