@@ -2,6 +2,7 @@ package com.eh.digitalpathology.dicomreceiver.service;
 
 import com.eh.digitalpathology.dicomreceiver.api.DicomObjectSink;
 import com.eh.digitalpathology.dicomreceiver.config.QrScpProperties;
+import com.eh.digitalpathology.dicomreceiver.config.WatcherProperties;
 import com.eh.digitalpathology.dicomreceiver.entity.TransferRecord;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -17,6 +18,7 @@ import org.dcm4che3.net.DataWriter;
 import org.dcm4che3.net.Device;
 import org.dcm4che3.net.Dimse;
 import org.dcm4che3.net.InputStreamDataWriter;
+import org.dcm4che3.net.PDVInputStream;
 import org.dcm4che3.net.Status;
 import org.dcm4che3.net.TransferCapability;
 import org.dcm4che3.net.pdu.AAssociateRQ;
@@ -25,6 +27,7 @@ import org.dcm4che3.net.service.BasicCEchoSCP;
 import org.dcm4che3.net.service.BasicCFindSCP;
 import org.dcm4che3.net.service.BasicCGetSCP;
 import org.dcm4che3.net.service.BasicCMoveSCP;
+import org.dcm4che3.net.service.BasicCStoreSCP;
 import org.dcm4che3.net.service.BasicQueryTask;
 import org.dcm4che3.net.service.BasicRetrieveTask;
 import org.dcm4che3.net.service.DicomServiceException;
@@ -37,7 +40,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.Iterator;
@@ -53,7 +61,9 @@ import java.util.regex.Pattern;
 /**
  * Query/Retrieve SCP (equivalent of dcm4che's {@code dcmqrscp}) served from the transfer
  * records in the database and the files held by the configured storage sink.
- * Supports C-ECHO, C-FIND, C-GET and C-MOVE on the Patient Root and Study Root models.
+ * Supports C-STORE (incoming images go to the watch folder), C-ECHO, storage commitment,
+ * and C-FIND / C-GET / C-MOVE on the Patient Root and Study Root models. This is the single
+ * DICOM network entry point of the application.
  */
 @Service
 public class QrScpService {
@@ -71,12 +81,15 @@ public class QrScpService {
     private final DatabaseService databaseService;
     private final DicomObjectSink sink;
     private final StorageCommitmentScp storageCommitmentScp;
+    private final Path watchDir;
     private ExecutorService executor;
     private ScheduledExecutorService scheduler;
     private Device device;
 
     public QrScpService(QrScpProperties props, DatabaseService databaseService, DicomObjectSink sink,
-                        StorageCommitmentScp storageCommitmentScp) {
+                        StorageCommitmentScp storageCommitmentScp,
+                        WatcherProperties watcherProperties) {
+        this.watchDir = Paths.get(watcherProperties.getDirectory());
         this.storageCommitmentScp = storageCommitmentScp;
         this.props = props;
         this.databaseService = databaseService;
@@ -89,6 +102,8 @@ public class QrScpService {
             log.info("Query/Retrieve SCP disabled (app.qr.enabled=false)");
             return;
         }
+        Files.createDirectories(watchDir);
+
         Connection conn = new Connection();
         conn.setHostname(props.getBindAddress());
         conn.setPort(props.getPort());
@@ -107,12 +122,21 @@ public class QrScpService {
                         UID.ExplicitVRLittleEndian));
             }
         }
+        // Accept C-STORE of any SOP class / transfer syntax (scanner or storeSCU -> watch folder).
+        ae.addTransferCapability(new TransferCapability(null, "*", TransferCapability.Role.SCP, "*"));
         // Needed so C-GET can push the instances back over the same association.
         ae.addTransferCapability(new TransferCapability(null, "*", TransferCapability.Role.SCU, "*"));
 
         DicomServiceRegistry registry = new DicomServiceRegistry();
         registry.addDicomService(new BasicCEchoSCP());
         registry.addDicomService(storageCommitmentScp);
+        registry.addDicomService(new BasicCStoreSCP("*") {
+            @Override
+            protected void store(Association as, PresentationContext pc, Attributes rq,
+                                 PDVInputStream data, Attributes rsp) throws IOException {
+                receive(as, pc, rq, data);
+            }
+        });
         registry.addDicomService(new BasicCFindSCP(FIND) {
             @Override
             protected QueryTask calculateMatches(Association as, PresentationContext pc, Attributes rq, Attributes keys)
@@ -163,6 +187,35 @@ public class QrScpService {
         if (device != null) device.unbindConnections();
         if (executor != null) executor.shutdown();
         if (scheduler != null) scheduler.shutdown();
+    }
+
+    // ---------------------------------------------------------------- C-STORE
+
+    /**
+     * Writes an incoming object into the watch folder as ".tmp" and renames it once complete, so
+     * the DirectoryWatcherService (which ignores ".tmp") never sees a half-written file.
+     */
+    private void receive(Association as, PresentationContext pc, Attributes rq, PDVInputStream data)
+            throws IOException {
+        String iuid = rq.getString(Tag.AffectedSOPInstanceUID);
+        String cuid = rq.getString(Tag.AffectedSOPClassUID);
+        String fileName = (iuid != null ? iuid : java.util.UUID.randomUUID().toString()) + ".dcm";
+        Path tmp = watchDir.resolve(fileName + ".tmp");
+        Path target = watchDir.resolve(fileName);
+        try {
+            Attributes fmi = as.createFileMetaInformation(iuid, cuid, pc.getTransferSyntax());
+            try (org.dcm4che3.io.DicomOutputStream out = new org.dcm4che3.io.DicomOutputStream(
+                    Files.newOutputStream(tmp), UID.ExplicitVRLittleEndian)) {
+                out.writeFileMetaInformation(fmi);
+                data.copyTo(out);
+            }
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            log.info("Received {} from {} -> {}", iuid, as.getRemoteAET(), target);
+        } catch (Exception e) {
+            try { Files.deleteIfExists(tmp); } catch (IOException ignored) { }
+            log.error("Failed to store {}: {}", iuid, e.getMessage());
+            throw new DicomServiceException(Status.ProcessingFailure, e);
+        }
     }
 
     // ---------------------------------------------------------------- C-FIND

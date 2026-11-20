@@ -54,14 +54,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ScpAndQrIntegrationTest {
 
     static Path tmp;
-    static int scpPort, qrPort;
+    static int qrPort;
     static final String SOP = "1.2.826.0.1.3680043.9.7.1";
     static final String CUID = UID.VLWholeSlideMicroscopyImageStorage;
 
     @BeforeAll
     static void init() throws Exception {
         tmp = Files.createTempDirectory("dcmit");
-        scpPort = freePort();
         qrPort = freePort();
     }
 
@@ -74,12 +73,10 @@ class ScpAndQrIntegrationTest {
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) throws Exception {
         tmp = Files.createTempDirectory("dcmit");
-        scpPort = freePort();
         qrPort = freePort();
         r.add("app.watch.directory", () -> tmp.resolve("in").toString());
         r.add("app.watch.poll-interval-ms", () -> "200");
         r.add("app.storage.local-path", () -> tmp.resolve("store").toString());
-        r.add("app.scp.port", () -> scpPort);
         r.add("app.qr.port", () -> qrPort);
         r.add("spring.datasource.url", () -> "jdbc:h2:mem:it" + System.nanoTime() + ";DB_CLOSE_DELAY=-1");
     }
@@ -116,9 +113,9 @@ class ScpAndQrIntegrationTest {
         Device d = clientDevice();
         ApplicationEntity ae = d.getApplicationEntity("CLIENT");
         AAssociateRQ rq = new AAssociateRQ();
-        rq.setCalledAET("DICOMRECV");
+        rq.setCalledAET("DCMQRSCP");
         rq.addPresentationContext(new PresentationContext(1, CUID, UID.ExplicitVRLittleEndian));
-        Connection remote = new Connection(null, "localhost", scpPort);
+        Connection remote = new Connection(null, "localhost", qrPort);
         Association as = ae.connect(remote, rq);
         as.cstore(CUID, SOP, 0, new DataWriterAdapter(dataset(patientName)), UID.ExplicitVRLittleEndian,
                 new DimseRSPHandler(as.nextMessageID()) {
@@ -276,26 +273,25 @@ class ScpAndQrIntegrationTest {
     @Test @Order(5)
     void storageCommitmentConfirmsKnownAndRejectsUnknownInstances() throws Exception {
         // known instance on the Store SCP (DICOMRECV) - the exact scenario from the reported error
-        int[] r = commit(scpPort, "DICOMRECV", SOP);
+        int[] r = commit(qrPort, "DCMQRSCP", SOP);
         assertEquals(Status.Success, r[0]);
         assertEquals(1, r[1]);
         assertEquals(1, r[2]);
         assertEquals(0, r[3]);
         // unknown instance -> failure event with reason 0112H
-        r = commit(scpPort, "DICOMRECV", SOP, "9.9.9.9");
+        r = commit(qrPort, "DCMQRSCP", SOP, "9.9.9.9");
         assertEquals(Status.Success, r[0]);
         assertEquals(2, r[1]);
         assertEquals(1, r[2]);
         assertEquals(1, r[3]);
-        // also available on the Query/Retrieve SCP
-        r = commit(qrPort, "DCMQRSCP", SOP);
-        assertEquals(1, r[1]);
     }
 
     @Test @Order(6)
     void dashboardShowsDeleteButtonAndDeleteRemovesRecord() throws Exception {
         mvc.perform(get("/")).andExpect(status().isOk())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("confirm(")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("confirm(")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(">Delete</button>")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/delete")));
         Long id = repo.findAll().get(0).getId();
         mvc.perform(post("/records/" + id + "/delete")).andExpect(status().is3xxRedirection());
         assertEquals(0, repo.count());

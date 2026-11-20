@@ -20,15 +20,10 @@ app:
   watch:
     directory: ./data/incoming
     poll-interval-ms: 5000
-  scp:
-    enabled: true
-    ae-title: DICOMRECV
-    port: 11112
-    bind-address: 0.0.0.0
   qr:
     enabled: true
     ae-title: DCMQRSCP
-    port: 11113
+    port: 11112
     bind-address: 0.0.0.0
     # C-MOVE destinations: AE title -> host:port
     move-destinations: {}

@@ -10,7 +10,7 @@ public class QrScpProperties {
 
     private boolean enabled = true;
     private String aeTitle = "DCMQRSCP";
-    private int port = 11113;
+    private int port = 11112;
     private String bindAddress = "0.0.0.0";
     /** C-MOVE destinations: AE title -> "host:port". */
     private Map<String, String> moveDestinations = new HashMap<>();
